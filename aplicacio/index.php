@@ -1,10 +1,10 @@
 <?php
 session_start();
 
-// ── CONFIGURACIÓ BD EXTERNA ──────────────────────────────────
-define('DB_HOST', '32.197.67.184'); // <── Tu IP externa conectada
-define('DB_USER', 'webapp'); // <── Cambiar por tu usuario remoto
-define('DB_PASS', 'contrasenya_segura'); // <── Cambiar por tu contraseña remota
+// ── CONFIGURACIÓ BD ──────────────────────────────────────────
+define('DB_HOST', 'localhost');
+define('DB_USER', 'root');        // Canviar pel teu usuari
+define('DB_PASS', '');            // Canviar per la teva contrasenya
 define('DB_NAME', 'InnovateTech');
 
 function getDB() {
@@ -14,12 +14,22 @@ function getDB() {
     return $conn;
 }
 
+// ── USUARIS DE L'APLICACIÓ ───────────────────────────────────
+$users = [
+    'admin'         => ['pass' => password_hash('admin123',       PASSWORD_DEFAULT), 'rol' => 'admin'],
+    'vendes'        => ['pass' => password_hash('vendes123',      PASSWORD_DEFAULT), 'rol' => 'vendes'],
+    'administracio' => ['pass' => password_hash('admin_rrhh123',  PASSWORD_DEFAULT), 'rol' => 'administracio'],
+    'treballador'   => ['pass' => password_hash('treballador123', PASSWORD_DEFAULT), 'rol' => 'treballador'],
+];
+
 // ── PERMISOS PER ROL ─────────────────────────────────────────
+// taules: taules visibles al sidebar
+// readonly: taules on no es pot inserir/editar/esborrar
 $ROL_PERMISOS = [
     'admin' => [
         'taules'   => ['DEPARTAMENT','EMPLEAT','USUARI','ROL','USUARI_ROL',
                        'GRUP_QUALITAT','TRUCADA','VIDEO','MESURA_AMPLADA_BANDA',
-                       'CONFIGURACIO_SERVIDOR','AVIS','CONTROL_BACKUP','CONTRASENYES'],
+                       'CONFIGURACIO_SERVIDOR','AVIS','CONTROL_BACKUP'],
         'readonly' => [],
     ],
     'vendes' => [
@@ -55,75 +65,17 @@ function isReadonly($table) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
 
-    // LOGIN DINÀMIC (AMB DETECCIÓ AUTOMÀTICA DE TEXT PLA / HASH)
+    // LOGIN
     if ($_POST['action'] === 'login') {
-        $email = $_POST['username'] ?? ''; 
+        $u = $_POST['username'] ?? '';
         $p = $_POST['password'] ?? '';
-        
-        if (empty($email) || empty($p)) {
-            echo json_encode(['ok' => false, 'msg' => 'Introdueix l\'email i la contrasenya']);
-            exit;
-        }
-
-        $db = getDB();
-        
-        // Consulta unint USUARI, la taula CONTRASENYES (només l'activa) i el seu ROL
-        $stmt = $db->prepare("
-            SELECT u.id_usuari, u.nom_complet, u.estat, u.email, c.hash_contrasenya AS pass_db, ur.nom_rol 
-            FROM USUARI u
-            INNER JOIN CONTRASENYES c ON u.id_usuari = c.usuari_id
-            LEFT JOIN USUARI_ROL ur ON u.id_usuari = ur.id_usuari
-            WHERE u.email = ? AND c.activa = 1
-            LIMIT 1
-        ");
-        
-        if (!$stmt) {
-            echo json_encode(['ok' => false, 'msg' => 'Error en preparar la consulta a la Base de Dades']);
-            exit;
-        }
-
-        $stmt->bind_param('s', $email);
-        $stmt->execute();
-        $res = $stmt->get_result();
-        
-        if ($res && $userRow = $res->fetch_assoc()) {
-            if ($userRow['estat'] === 'bloquejat') {
-                echo json_encode(['ok' => false, 'msg' => 'Aquest usuari està bloquejat']);
-                exit;
-            }
-
-            $pwd_db = $userRow['pass_db'];
-
-            // ── VERIFICACIÓ INTEL·LIGENT AUTOMÀTICA ──────────────────────────
-            // Comprovem si el text de la BD té format de hash de PHP (comença per $)
-            if (strpos($pwd_db, '$') === 0) {
-                // Si és un hash, fem servir la funció nativa i segura
-                $validPassword = password_verify($p, $pwd_db);
-            } else {
-                // Si NO comença per $, significa que l'heu guardat literalment.
-                // Per tant, comparem el text introduït de forma directa.
-                $validPassword = ($p === $pwd_db);
-            }
-            // ──────────────────────────────────────────────────────────────────
-
-            if ($validPassword) {
-                $_SESSION['user']        = $userRow['email'];
-                $_SESSION['nom_complet'] = $userRow['nom_complet'];
-                $_SESSION['rol']         = $userRow['nom_rol'] ?? 'treballador'; 
-                
-                echo json_encode([
-                    'ok' => true, 
-                    'rol' => $_SESSION['rol'], 
-                    'nom_complet' => $_SESSION['nom_complet']
-                ]);
-            } else {
-                echo json_encode(['ok' => false, 'msg' => 'Contrasenya incorrecta']);
-            }
+        if (isset($users[$u]) && password_verify($p, $users[$u]['pass'])) {
+            $_SESSION['user'] = $u;
+            $_SESSION['rol']  = $users[$u]['rol'];
+            echo json_encode(['ok' => true, 'rol' => $_SESSION['rol']]);
         } else {
-            echo json_encode(['ok' => false, 'msg' => 'No s\'ha trobat cap usuari actiu amb aquest email']);
+            echo json_encode(['ok' => false, 'msg' => 'Credencials incorrectes']);
         }
-        $stmt->close();
-        $db->close();
         exit;
     }
 
@@ -200,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
-    // TAULES DISPONIBLES
+    // TAULES DISPONIBLES — filtrades per rol
     if ($action === 'tables') {
         global $ROL_PERMISOS;
         $rol = getRol();
@@ -249,6 +201,7 @@ body {
   overflow-x: hidden;
 }
 
+/* ── NOISE OVERLAY ── */
 body::before {
   content: '';
   position: fixed;
@@ -258,6 +211,7 @@ body::before {
   z-index: 0;
 }
 
+/* ── LOGIN ── */
 #login-screen {
   position: fixed;
   inset: 0;
@@ -368,8 +322,10 @@ body::before {
   display: none;
 }
 
+/* ── APP ── */
 #app { display: none; min-height: 100vh; }
 
+/* ── SIDEBAR ── */
 .sidebar {
   position: fixed;
   left: 0; top: 0; bottom: 0;
@@ -433,7 +389,7 @@ body::before {
   text-align: left;
 }
 .table-btn:hover { background: var(--bg3); color: var(--text); }
-.table-btn.active { background: rgba(108,100,255,0.15); color: var(--accent); }
+.table-btn.active { background: rgba(108,99,255,0.15); color: var(--accent); }
 .table-btn .dot {
   width: 6px; height: 6px;
   border-radius: 50%;
@@ -469,9 +425,10 @@ body::before {
   flex-shrink: 0;
 }
 .user-info { flex: 1; overflow: hidden; }
-.user-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-name { font-size: 13px; font-weight: 700; }
 .user-rol { font-size: 11px; font-family: var(--mono); color: var(--muted); }
 
+/* ── MAIN ── */
 .main {
   margin-left: 260px;
   padding: 40px;
@@ -535,6 +492,7 @@ body::before {
   font-size: 16px;
 }
 
+/* ── STATS ── */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -561,6 +519,7 @@ body::before {
 .stat-label { font-size: 11px; font-family: var(--mono); color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, var(--text), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
+/* ── TABLE ── */
 .table-card {
   background: var(--bg2);
   border: 1px solid var(--border);
@@ -606,6 +565,7 @@ tbody tr:last-child td { border-bottom: none; }
 
 .actions-cell { display: flex; gap: 6px; }
 
+/* ── MODAL ── */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -648,6 +608,7 @@ tbody tr:last-child td { border-bottom: none; }
 .modal-grid .field.full { grid-column: 1 / -1; }
 .modal-actions { display: flex; gap: 12px; justify-content: flex-end; }
 
+/* ── TOAST ── */
 .toast {
   position: fixed;
   bottom: 32px;
@@ -666,6 +627,7 @@ tbody tr:last-child td { border-bottom: none; }
 .toast.success { background: rgba(67,232,176,0.15); border: 1px solid rgba(67,232,176,0.4); color: var(--success); }
 .toast.error   { background: rgba(255,101,132,0.15); border: 1px solid rgba(255,101,132,0.4); color: var(--danger); }
 
+/* ── EMPTY STATE ── */
 .empty {
   text-align: center;
   padding: 64px 32px;
@@ -674,6 +636,7 @@ tbody tr:last-child td { border-bottom: none; }
 .empty-icon { font-size: 40px; margin-bottom: 16px; opacity: 0.4; }
 .empty-text { font-size: 14px; font-family: var(--mono); }
 
+/* ── LOADING ── */
 .loading {
   display: flex;
   align-items: center;
@@ -695,6 +658,7 @@ tbody tr:last-child td { border-bottom: none; }
 @keyframes spin    { to { transform: rotate(360deg); } }
 @keyframes fadeUp  { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
 
+/* ── WELCOME ── */
 .welcome {
   display: flex;
   flex-direction: column;
@@ -722,13 +686,14 @@ tbody tr:last-child td { border-bottom: none; }
 </head>
 <body>
 
+<!-- LOGIN -->
 <div id="login-screen">
   <div class="login-card">
     <div class="login-logo">InnovateTech · CPD</div>
     <h2 class="login-title">Panel de<br>gestió</h2>
     <div class="field">
-      <label>Email de l'usuari</label>
-      <input type="text" id="login-user" placeholder="joan.garcia@innovatech.com" autocomplete="username">
+      <label>Usuari</label>
+      <input type="text" id="login-user" placeholder="admin" autocomplete="username">
     </div>
     <div class="field">
       <label>Contrasenya</label>
@@ -739,7 +704,9 @@ tbody tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<!-- APP -->
 <div id="app">
+  <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-logo">
       <div class="logo-tag">Sistema de gestió</div>
@@ -761,6 +728,7 @@ tbody tr:last-child td { border-bottom: none; }
     </div>
   </aside>
 
+  <!-- Main -->
   <main class="main">
     <div id="content">
       <div class="welcome">
@@ -772,6 +740,7 @@ tbody tr:last-child td { border-bottom: none; }
   </main>
 </div>
 
+<!-- Modal -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
     <div class="modal-title" id="modal-title">Nou registre</div>
@@ -783,6 +752,7 @@ tbody tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<!-- Toast -->
 <div class="toast" id="toast"></div>
 
 <script>
@@ -797,28 +767,18 @@ let editingPk      = null;
 async function doLogin() {
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
-  const errorEl = document.getElementById('login-error');
-  
-  errorEl.style.display = 'none';
-
-  try {
-    const r = await post({ action:'login', username:u, password:p });
-    if (r && r.ok) {
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
-      
-      document.getElementById('user-name').textContent = r.nom_complet;
-      document.getElementById('user-rol').textContent  = r.rol;
-      document.getElementById('user-avatar').textContent = r.nom_complet ? r.nom_complet[0].toUpperCase() : 'U';
-      
-      loadTables();
-    } else {
-      errorEl.textContent = r.msg || 'Error desconegut en iniciar sessió.';
-      errorEl.style.display = 'block';
-    }
-  } catch (err) {
-    errorEl.textContent = 'Error de connexió amb el servidor.';
-    errorEl.style.display = 'block';
+  const r = await post({ action:'login', username:u, password:p });
+  if (r.ok) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('user-name').textContent = u;
+    document.getElementById('user-rol').textContent  = r.rol;
+    document.getElementById('user-avatar').textContent = u[0].toUpperCase();
+    loadTables();
+  } else {
+    const el = document.getElementById('login-error');
+    el.textContent = r.msg;
+    el.style.display = 'block';
   }
 }
 
@@ -905,6 +865,7 @@ async function doSearch(q) {
   const data = await post({ action:'read', table: currentTable, search: q });
   currentRows = data.rows || [];
   renderTable(currentRows);
+  // Restaurar el valor del input
   const inp = document.getElementById('search-input');
   if (inp) { inp.value = q; inp.focus(); }
 }
@@ -926,6 +887,7 @@ function openEdit(row) {
 }
 
 function buildFields(row) {
+  const skip = currentCols[0]; // skip PK on insert
   const fields = editingId ? currentCols : currentCols.slice(1);
   document.getElementById('modal-fields').innerHTML = fields.map(c => `
     <div class="field ${fields.length === 1 ? 'full' : ''}">
