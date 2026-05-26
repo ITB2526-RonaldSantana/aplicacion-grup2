@@ -5,7 +5,7 @@ session_start();
 // ── CONFIGURACIÓ BD ──────────────────────────────────────────
 define('DB_HOST', '32.197.67.184');
 define('DB_USER', 'webadmin');        // Canviar pel teu usuari
-define('DB_PASS', 'contrasenya_segura');    // Canviar per la teva contrasenya
+define('DB_PASS', 'pirineus');    // Canviar per la teva contrasenya
 define('DB_NAME', 'InnovateTech');
 
 function getDB() {
