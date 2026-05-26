@@ -1,10 +1,11 @@
 <?php
+session_save_path(sys_get_temp_dir());
 session_start();
 
 // ── CONFIGURACIÓ BD ──────────────────────────────────────────
 define('DB_HOST', '32.197.67.184');
-define('DB_USER', 'webadmin');        
-define('DB_PASS', 'pirineus');    
+define('DB_USER', 'webadmin');        // Canviar pel teu usuari
+define('DB_PASS', 'contrasenya_segura');    // Canviar per la teva contrasenya
 define('DB_NAME', 'InnovateTech');
 
 function getDB() {
@@ -708,6 +709,66 @@ tbody tr:last-child td { border-bottom: none; }
   font-weight: 500;
 }
 .tag-accent { background: rgba(108,99,255,0.15); color: var(--accent); }
+
+.btn-info { background: rgba(108,99,255,0.12); color: var(--accent); border: 1px solid rgba(108,99,255,0.3); }
+.btn-info:hover { background: rgba(108,99,255,0.22); }
+
+.cell-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(108,99,255,0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  display: inline-block;
+  vertical-align: middle;
+}
+.cell-link:hover { color: #9d96ff; border-bottom-color: #9d96ff; }
+
+.view-list { display: flex; flex-direction: column; margin-bottom: 28px; }
+.view-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 16px;
+  align-items: start;
+  padding: 13px 0;
+  border-bottom: 1px solid rgba(42,42,58,0.6);
+}
+.view-row:last-child { border-bottom: none; }
+.view-key {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-top: 3px;
+}
+.view-val {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+.view-null { color: var(--muted); font-style: italic; }
+.view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(108,99,255,0.1);
+  border: 1px solid rgba(108,99,255,0.3);
+  border-radius: 8px;
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+  transition: all 0.2s;
+  line-height: 1.4;
+}
+.view-link:hover { background: rgba(108,99,255,0.2); border-color: rgba(108,99,255,0.5); color: #9d96ff; }
+.view-link-icon { font-size: 13px; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -773,6 +834,16 @@ tbody tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<div class="modal-overlay" id="view-modal">
+  <div class="modal">
+    <div class="modal-title" id="view-title">Registre</div>
+    <div class="view-list" id="view-fields"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeView()">Tancar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -824,6 +895,7 @@ document.getElementById('login-pass').addEventListener('keydown', e => {
 // ── TAULES ────────────────────────────────────────────────────
 async function loadTables() {
   const tables = await post({ action:'tables' });
+  if (!Array.isArray(tables)) { location.reload(); return; }
   const list   = document.getElementById('table-list');
   list.innerHTML = '';
   tables.forEach(t => {
@@ -879,9 +951,10 @@ function renderTable(rows) {
               </tr></thead>
               <tbody>
                 ${rows.map(r => `<tr>
-                  ${currentCols.map(c => `<td title="${r[c] ?? ''}">${r[c] ?? '<span style="color:var(--muted)">—</span>'}</td>`).join('')}
+                  ${currentCols.map(c => `<td title="${r[c] ?? ''}">${renderCell(r[c])}</td>`).join('')}
                   <td><div class="actions-cell">
-                    ${currentReadonly ? '<span class="tag tag-accent">Només lectura</span>' : `<button class="btn btn-sm btn-success" onclick='openEdit(${JSON.stringify(r)})'>Editar</button><button class="btn btn-sm btn-danger" onclick="deleteRow(${r[pk]}, '${pk}')">Eliminar</button>`}
+                    <button class="btn btn-sm btn-info" onclick='openView(${JSON.stringify(r)})'>Veure</button>
+                    ${!currentReadonly ? `<button class="btn btn-sm btn-success" onclick='openEdit(${JSON.stringify(r)})'>Editar</button><button class="btn btn-sm btn-danger" onclick="deleteRow(${r[pk]}, '${pk}')">Eliminar</button>` : ''}
                   </div></td>
                 </tr>`).join('')}
               </tbody>
@@ -897,6 +970,49 @@ async function doSearch(q) {
   renderTable(currentRows);
   const inp = document.getElementById('search-input');
   if (inp) { inp.value = q; inp.focus(); }
+}
+
+// ── UTILS RENDER ─────────────────────────────────────────────
+function isURL(val) {
+  return typeof val === 'string' && /^https?:\/\/.+/i.test(val.trim());
+}
+
+function renderCell(val) {
+  if (val === null || val === undefined || val === '')
+    return '<span style="color:var(--muted)">—</span>';
+  const s = String(val);
+  if (isURL(s))
+    return `<a class="cell-link" href="${s}" target="_blank" rel="noopener" title="${s}">${s}</a>`;
+  return s.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── MODAL VISUALITZAR ─────────────────────────────────────────
+function openView(row) {
+  const pk = currentCols[0];
+  document.getElementById('view-title').innerHTML =
+    `Registre <span>${currentTable} #${row[pk]}</span>`;
+  document.getElementById('view-fields').innerHTML = currentCols.map(c => {
+    const val = row[c];
+    let html;
+    if (val === null || val === undefined || val === '') {
+      html = '<span class="view-null">— buit —</span>';
+    } else if (isURL(String(val))) {
+      html = `<a class="view-link" href="${val}" target="_blank" rel="noopener">
+                <span class="view-link-icon">↗</span>${val}
+              </a>`;
+    } else {
+      html = String(val).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    return `<div class="view-row">
+              <div class="view-key">${c}</div>
+              <div class="view-val">${html}</div>
+            </div>`;
+  }).join('');
+  document.getElementById('view-modal').classList.add('open');
+}
+
+function closeView() {
+  document.getElementById('view-modal').classList.remove('open');
 }
 
 // ── MODAL ─────────────────────────────────────────────────────
@@ -977,6 +1093,9 @@ function toast(msg, type = 'success') {
 
 document.getElementById('modal').addEventListener('click', e => {
   if (e.target === document.getElementById('modal')) closeModal();
+});
+document.getElementById('view-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('view-modal')) closeView();
 });
 </script>
 </body>
